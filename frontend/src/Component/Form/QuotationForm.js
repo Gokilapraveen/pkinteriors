@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import areasData from "../../JsonData/area.json";
 
+const API_BASE = "https://pkinteriors.onrender.com";
+
 const QuotationForm = () => {
   const [ownerPhone, setOwnerPhone] = useState("");
   const [areas] = useState(areasData);
@@ -11,7 +13,7 @@ const QuotationForm = () => {
   const [cost, setCost] = useState(0);
   const [items, setItems] = useState([]);
 
-  // ---------- COST ----------
+  /* ---------- COST ---------- */
   const calculateCost = (m, r) => {
     const qty = parseFloat(m);
     const rateNum = parseFloat(r);
@@ -27,15 +29,20 @@ const QuotationForm = () => {
     }
   };
 
-  // ---------- ADD ITEM ----------
+  /* ---------- ADD ITEM ---------- */
   const handleAddItem = () => {
     if (!area || !description || !measurement) {
       alert("Fill all fields");
       return;
     }
 
-    setItems([
-      ...items,
+    if (isNaN(Number(measurement))) {
+      alert("Measurement must be a number");
+      return;
+    }
+
+    setItems((prev) => [
+      ...prev,
       {
         area,
         description,
@@ -51,7 +58,7 @@ const QuotationForm = () => {
     setCost(0);
   };
 
-  // ---------- LOCAL STORAGE ----------
+  /* ---------- LOCAL STORAGE ---------- */
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem("quotationItems") || "[]");
     setItems(saved);
@@ -61,7 +68,7 @@ const QuotationForm = () => {
     localStorage.setItem("quotationItems", JSON.stringify(items));
   }, [items]);
 
-  // ---------- APPROVE ----------
+  /* ---------- APPROVE ---------- */
   const handleApprove = async () => {
     if (!ownerPhone) {
       alert("Enter owner phone number");
@@ -74,7 +81,7 @@ const QuotationForm = () => {
     }
 
     try {
-      const res = await fetch("http://localhost:5000/api/quotation", {
+      const res = await fetch(`${API_BASE}/api/quotation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ownerPhone, items }),
@@ -88,7 +95,7 @@ const QuotationForm = () => {
         setOwnerPhone("");
         localStorage.removeItem("quotationItems");
       } else {
-        alert("Failed to save quotation");
+        alert(data.error || "Failed to save quotation");
       }
     } catch (err) {
       alert("Server error");
@@ -101,7 +108,6 @@ const QuotationForm = () => {
     <div style={{ padding: 20 }}>
       <h2>Quotation Form</h2>
 
-      {/* OWNER PHONE — ONCE */}
       <input
         type="tel"
         placeholder="Owner Phone Number"

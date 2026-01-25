@@ -7,7 +7,7 @@ const ViewQuotation = () => {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const printRef = useRef();
-
+  const API_BASE = "https://pkinteriors.onrender.com";
   /* ---------------- FETCH ---------------- */
   const fetchQuotation = async () => {
     if (!phone) {
@@ -20,7 +20,7 @@ const ViewQuotation = () => {
       setData(null);
 
       const res = await fetch(
-        `http://localhost:5000/api/quotation/${phone}`
+        `${API_BASE}/api/quotation/${phone}`
       );
       const result = await res.json();
 
@@ -228,4 +228,3 @@ const ViewQuotation = () => {
 };
 
 export default ViewQuotation;
-    
