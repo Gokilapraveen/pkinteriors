@@ -87,6 +87,33 @@ app.post("/api/quotation", async (req, res) => {
     client.release();
   }
 });
+/* ---------------- GET ALL QUOTATIONS GROUPED BY PHONE ---------------- */
+app.get("/api/fetchquotations", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT owner_phone,
+             json_agg(
+               json_build_object(
+                 'area', area,
+                 'description', description,
+                 'measurement', measurement,
+                 'rate', rate,
+                 'cost', cost,
+                 'created_at', created_at
+               )
+             ) AS items,
+             SUM(cost) AS total_cost
+      FROM quotations
+      GROUP BY owner_phone
+      ORDER BY owner_phone;
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Fetch all grouped error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
 
 /* ---------------- GET QUOTATION ---------------- */
 app.get("/api/quotation/:phone", async (req, res) => {
