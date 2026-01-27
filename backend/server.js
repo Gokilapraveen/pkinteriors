@@ -114,6 +114,59 @@ app.get("/api/fetchquotations", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+/* ---------------- UPDATE QUOTATION ---------------- */
+app.put("/api/quotation/:id", async (req, res) => {
+  const { id } = req.params;
+  const { area, description, measurement, rate, cost } = req.body;
+
+  if (!area || !description || !measurement || !rate || !cost) {
+    return res.status(400).json({ error: "All fields are required" });
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE quotations
+       SET area = $1,
+           description = $2,
+           measurement = $3,
+           rate = $4,
+           cost = $5
+       WHERE id = $6
+       RETURNING *`,
+      [area, description, Number(measurement), Number(rate), Number(cost), id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Quotation not found" });
+    }
+
+    res.json({ success: true, updatedQuotation: result.rows[0] });
+  } catch (err) {
+    console.error("❌ Update error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/* ---------------- DELETE QUOTATION ---------------- */
+app.delete("/api/quotation/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM quotations WHERE id = $1 RETURNING *`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Quotation not found" });
+    }
+
+    res.json({ success: true, deletedQuotation: result.rows[0] });
+  } catch (err) {
+    console.error("❌ Delete error:", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
 
 /* ---------------- GET QUOTATION ---------------- */
 app.get("/api/quotation/:phone", async (req, res) => {
