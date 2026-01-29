@@ -5,36 +5,47 @@ import "./login.css";
 const API_BASE = "https://pkinteriors.onrender.com";
 
 function Login() {
+  /* ---------------- USERS ---------------- */
   const database = [
     { username: "admin", password: "admin123" },
     { username: "user2", password: "pass2" },
   ];
 
-  const errors = { uname: "Invalid username", pass: "Invalid password" };
+  const errors = {
+    uname: "Invalid username",
+    pass: "Invalid password",
+  };
+
   const [errorMessages, setErrorMessages] = useState({});
   const [quotations, setQuotations] = useState([]);
 
-  const handleSubmit = (event) => {
-    event.preventDefault();
+  /* ---------------- LOGIN ---------------- */
+  const handleSubmit = (e) => {
+    e.preventDefault();
     const { uname, pass } = document.forms[0];
-    const userData = database.find((user) => user.username === uname.value);
+    const user = database.find((u) => u.username === uname.value);
 
-    if (userData) {
-      if (userData.password !== pass.value) {
-        setErrorMessages({ name: "pass", message: errors.pass });
-      } else {
-        sessionStorage.setItem("User", userData.username);
-        sessionStorage.setItem("Loggedin", "true");
-        fetchQuotations();
-      }
-    } else {
+    if (!user) {
       setErrorMessages({ name: "uname", message: errors.uname });
+      return;
     }
+
+    if (user.password !== pass.value) {
+      setErrorMessages({ name: "pass", message: errors.pass });
+      return;
+    }
+
+    sessionStorage.setItem("User", user.username);
+    sessionStorage.setItem("Loggedin", "true");
+    fetchQuotations();
   };
 
   const renderErrorMessage = (name) =>
-    name === errorMessages.name && <div className="error">{errorMessages.message}</div>;
+    name === errorMessages.name && (
+      <div className="error">{errorMessages.message}</div>
+    );
 
+  /* ---------------- FETCH ---------------- */
   const fetchQuotations = async () => {
     try {
       const res = await axios.get(`${API_BASE}/api/fetchquotations`);
@@ -45,23 +56,26 @@ function Login() {
   };
 
   useEffect(() => {
-    if (sessionStorage.getItem("Loggedin")) fetchQuotations();
+    if (sessionStorage.getItem("Loggedin")) {
+      fetchQuotations();
+    }
   }, []);
 
+  /* ---------------- LOGOUT ---------------- */
   const logoutSession = () => {
-    sessionStorage.removeItem("User");
-    sessionStorage.removeItem("Loggedin");
+    sessionStorage.clear();
     setQuotations([]);
   };
 
-  const handleEdit = (phone, idx) => {
+  /* ---------------- EDIT ---------------- */
+  const handleEdit = (phone, id) => {
     setQuotations((prev) =>
       prev.map((group) =>
         group.owner_phone === phone
           ? {
               ...group,
-              items: group.items.map((item, i) =>
-                i === idx ? { ...item, isEditing: true } : item
+              items: group.items.map((item) =>
+                item.id === id ? { ...item, isEditing: true } : item
               ),
             }
           : group
@@ -69,159 +83,185 @@ function Login() {
     );
   };
 
-  const handleInputChange = (e, phone, idx, field) => {
-    const value = e.target.value;
+  const handleInputChange = (phone, id, field, value) => {
     setQuotations((prev) =>
       prev.map((group) =>
         group.owner_phone === phone
           ? {
               ...group,
-              items: group.items.map((item, i) =>
-                i === idx ? { ...item, [field]: value } : item
-              ),
+              items: group.items.map((item) => {
+                if (item.id !== id) return item;
+
+                const updated = { ...item, [field]: value };
+
+                if (field === "measurement" || field === "rate") {
+                  const m = Number(updated.measurement || 0);
+                  const r = Number(updated.rate || 0);
+                  updated.cost = m * r;
+                }
+
+                return updated;
+              }),
             }
           : group
       )
     );
   };
 
-  // ---------- SAVE to DB ----------
-  const handleSave = async (phone, idx) => {
-    const itemToSave = quotations.find((group) => group.owner_phone === phone).items[idx];
+  /* ---------------- SAVE ---------------- */
+  const handleSave = async (phone, id) => {
+    const group = quotations.find((g) => g.owner_phone === phone);
+    const item = group?.items.find((i) => i.id === id);
+    if (!item) return;
+
     try {
-      await axios.put(`${API_BASE}/api/quotation/${itemToSave.id}`, {
-        area: itemToSave.area,
-        description: itemToSave.description,
-        measurement: itemToSave.measurement,
-        rate: itemToSave.rate,
-        cost: itemToSave.cost,
+      await axios.put(`${API_BASE}/api/quotation/${id}`, {
+        area: item.area,
+        description: item.description,
+        measurement: Number(item.measurement),
+        rate: Number(item.rate),
+        cost: Number(item.cost),
       });
 
-      // Exit edit mode after saving
       setQuotations((prev) =>
         prev.map((group) =>
           group.owner_phone === phone
             ? {
                 ...group,
-                items: group.items.map((item, i) =>
-                  i === idx ? { ...item, isEditing: false } : item
+                items: group.items.map((i) =>
+                  i.id === id ? { ...i, isEditing: false } : i
                 ),
               }
             : group
         )
       );
-      alert("Quotation updated successfully!");
+
+      alert("✅ Quotation updated");
     } catch (err) {
       console.error("Save error:", err);
-      alert("Failed to save changes.");
+      alert("❌ Update failed");
     }
   };
 
-  // ---------- DELETE from DB ----------
-  const handleDelete = async (phone, idx) => {
-    if (!window.confirm("Are you sure you want to delete this row?")) return;
+  /* ---------------- DELETE ---------------- */
+  const handleDelete = async (phone, id) => {
+    if (!window.confirm("Delete this item?")) return;
 
-    const itemToDelete = quotations.find((group) => group.owner_phone === phone).items[idx];
     try {
-      await axios.delete(`${API_BASE}/api/quotation/${itemToDelete.id}`);
+      await axios.delete(`${API_BASE}/api/quotation/${id}`);
+
       setQuotations((prev) =>
         prev.map((group) =>
           group.owner_phone === phone
-            ? { ...group, items: group.items.filter((_, i) => i !== idx) }
+            ? { ...group, items: group.items.filter((i) => i.id !== id) }
             : group
         )
       );
-      alert("Quotation deleted successfully!");
+
+      alert("🗑️ Deleted successfully");
     } catch (err) {
       console.error("Delete error:", err);
-      alert("Failed to delete quotation.");
+      alert("❌ Delete failed");
     }
   };
 
-  // ---------- JSX ----------
+  /* ---------------- LOGIN UI ---------------- */
   const renderForm = (
     <div className="form">
-      <div className="logincontainer">
-        <div className="screen">
-          <div className="screen__content">
-            <form className="login" onSubmit={handleSubmit}>
-              <div className="login__field">
-                <i className="login__icon fas fa-user"></i>
-                <input type="text" className="login__input" name="uname" required placeholder="Username" />
-                {renderErrorMessage("uname")}
-              </div>
-              <div className="login__field">
-                <i className="login__icon fas fa-lock"></i>
-                <input type="password" className="login__input" name="pass" required placeholder="Password" />
-                {renderErrorMessage("pass")}
-              </div>
-              <button className="button login__submit">
-                <span className="button__text">Log In</span>
-                <i className="button__icon fas fa-chevron-right"></i>
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
+      <form className="login" onSubmit={handleSubmit}>
+        <input name="uname" placeholder="Username" required />
+        {renderErrorMessage("uname")}
+
+        <input name="pass" type="password" placeholder="Password" required />
+        {renderErrorMessage("pass")}
+
+        <button>Login</button>
+      </form>
     </div>
   );
 
+  /* ---------------- DASHBOARD ---------------- */
   const renderDashboard = (
     <div className="dashboard">
       <h3>Welcome, {sessionStorage.getItem("User")}</h3>
-      <button className="btn btn-danger mb-3" onClick={logoutSession}>
-        Logout
-      </button>
+      <button onClick={logoutSession}>Logout</button>
 
-      <h4>All Quotations</h4>
-      {quotations.length === 0 ? (
-        <p>No quotations found.</p>
-      ) : (
-        quotations.map((group) => (
-          <div key={group.owner_phone} className="mb-4">
-            <h5>Phone: {group.owner_phone} | Total Cost: {group.total_cost}</h5>
-            <table className="table table-bordered">
-              <thead>
-                <tr>
-                  <th>Area</th>
-                  <th>Description</th>
-                  <th>Measurement</th>
-                  <th>Rate</th>
-                  <th>Cost</th>
-                  <th>Created At</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {group.items.map((item, idx) => (
-                  <tr key={idx}>
-                    <td>{item.isEditing ? <input value={item.area} onChange={(e) => handleInputChange(e, group.owner_phone, idx, "area")} /> : item.area}</td>
-                    <td>{item.isEditing ? <input value={item.description} onChange={(e) => handleInputChange(e, group.owner_phone, idx, "description")} /> : item.description}</td>
-                    <td>{item.isEditing ? <input type="number" value={item.measurement} onChange={(e) => handleInputChange(e, group.owner_phone, idx, "measurement")} /> : item.measurement}</td>
-                    <td>{item.isEditing ? <input type="number" value={item.rate} onChange={(e) => handleInputChange(e, group.owner_phone, idx, "rate")} /> : item.rate}</td>
-                    <td>{item.isEditing ? <input type="number" value={item.cost} onChange={(e) => handleInputChange(e, group.owner_phone, idx, "cost")} /> : item.cost}</td>
-                    <td>{new Date(item.created_at).toLocaleString()}</td>
-                    <td>
+      {quotations.map((group) => (
+        <div key={group.owner_phone}>
+          <h4>
+            📞 {group.owner_phone} | 💰 ₹{group.total_cost}
+          </h4>
+
+          <table border="1">
+            <thead>
+              <tr>
+                <th>Area</th>
+                <th>Description</th>
+                <th>Measurement</th>
+                <th>Rate</th>
+                <th>Cost</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {group.items.map((item) => (
+                <tr key={item.id}>
+                  {["area", "description", "measurement", "rate"].map((field) => (
+                    <td key={field}>
                       {item.isEditing ? (
-                        <button className="save-btn" onClick={() => handleSave(group.owner_phone, idx)}>💾</button>
+                        <input
+                          type={field === "area" || field === "description" ? "text" : "number"}
+                          value={item[field]}
+                          onChange={(e) =>
+                            handleInputChange(
+                              group.owner_phone,
+                              item.id,
+                              field,
+                              e.target.value
+                            )
+                          }
+                        />
                       ) : (
-                        <>
-                          <button className="edit-btn" onClick={() => handleEdit(group.owner_phone, idx)}>✏️</button>
-                          <button className="delete-btn" onClick={() => handleDelete(group.owner_phone, idx)}>🗑️</button>
-                        </>
+                        item[field]
                       )}
                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ))
-      )}
+                  ))}
+
+                  <td>{item.cost}</td>
+                  <td>{new Date(item.created_at).toLocaleString()}</td>
+
+                  <td>
+                    {item.isEditing ? (
+                      <button onClick={() => handleSave(group.owner_phone, item.id)}>
+                        💾
+                      </button>
+                    ) : (
+                      <>
+                        <button onClick={() => handleEdit(group.owner_phone, item.id)}>
+                          ✏️
+                        </button>
+                        <button onClick={() => handleDelete(group.owner_phone, item.id)}>
+                          🗑️
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   );
 
-  return <div className="app">{!sessionStorage.getItem("Loggedin") ? renderForm : renderDashboard}</div>;
+  return (
+    <div className="app">
+      {!sessionStorage.getItem("Loggedin") ? renderForm : renderDashboard}
+    </div>
+  );
 }
 
 export default Login;

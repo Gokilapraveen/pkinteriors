@@ -1,208 +1,164 @@
-import React, { useState, useEffect } from "react";
-import areasData from "../../JsonData/area.json";
+import React, { useState } from "react";
+import axios from "axios";
 
 const API_BASE = "https://pkinteriors.onrender.com";
 
-const QuotationForm = () => {
-  const [ownerPhone, setOwnerPhone] = useState("");
-  const [areas] = useState(areasData);
+function Quotation() {
+  const [phone, setPhone] = useState("");
   const [area, setArea] = useState("");
   const [description, setDescription] = useState("");
   const [measurement, setMeasurement] = useState("");
-  const [rate, setRate] = useState(0);
-  const [cost, setCost] = useState(0);
+  const [rate, setRate] = useState("");
   const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  /* ---------- COST ---------- */
-  const calculateCost = (m, r) => {
-    const qty = parseFloat(m);
-    const rateNum = parseFloat(r);
-    setCost(!isNaN(qty) && !isNaN(rateNum) ? qty * rateNum : 0);
-  };
-
-  const handleDescriptionChange = (value) => {
-    setDescription(value);
-    const selected = areas[area]?.find((d) => d.label === value);
-    if (selected) {
-      setRate(selected.rate);
-      calculateCost(measurement, selected.rate);
-    }
-  };
-
-  /* ---------- ADD ITEM ---------- */
-  const handleAddItem = () => {
-    if (!area || !description || !measurement) {
-      alert("Fill all fields");
+  /* ---------------- ADD ITEM TO TABLE ---------------- */
+  const addItem = () => {
+    if (!area || !measurement || !rate) {
+      alert("Please fill all item fields");
       return;
     }
 
-    if (isNaN(Number(measurement))) {
-      alert("Measurement must be a number");
-      return;
-    }
+    const cost = Number(measurement) * Number(rate);
 
-    setItems((prev) => [
-      ...prev,
+    setItems([
+      ...items,
       {
         area,
         description,
         measurement: Number(measurement),
         rate: Number(rate),
-        cost: Number(cost),
+        cost,
       },
     ]);
 
+    // reset inputs
+    setArea("");
     setDescription("");
     setMeasurement("");
-    setRate(0);
-    setCost(0);
+    setRate("");
   };
 
-  /* ---------- LOCAL STORAGE ---------- */
-  useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem("quotationItems") || "[]");
-    setItems(saved);
-  }, []);
+  /* ---------------- REMOVE ITEM ---------------- */
+  const removeItem = (index) => {
+    const updated = [...items];
+    updated.splice(index, 1);
+    setItems(updated);
+  };
 
-  useEffect(() => {
-    localStorage.setItem("quotationItems", JSON.stringify(items));
-  }, [items]);
+  /* ---------------- TOTAL ---------------- */
+  const totalCost = items.reduce((sum, i) => sum + i.cost, 0);
 
-  /* ---------- APPROVE ---------- */
-  const handleApprove = async () => {
-    if (!ownerPhone) {
-      alert("Enter owner phone number");
-      return;
-    }
-
-    if (items.length === 0) {
-      alert("No items added");
+  /* ---------------- SUBMIT QUOTATION ---------------- */
+  const submitQuotation = async () => {
+    if (!phone || items.length === 0) {
+      alert("Phone and at least one item required");
       return;
     }
 
     try {
-      const res = await fetch(`${API_BASE}/api/quotation`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerPhone, items }),
+      setLoading(true);
+      await axios.post(`${API_BASE}/api/quotation`, {
+        phone,
+        items,
+        total_cost: totalCost,
       });
 
-      const data = await res.json();
+      alert("Quotation saved successfully ✅");
 
-      if (data.success) {
-        alert("Quotation saved successfully ✅");
-        setItems([]);
-        setOwnerPhone("");
-        localStorage.removeItem("quotationItems");
-      } else {
-        alert(data.error || "Failed to save quotation");
-      }
+      // reset all
+      setPhone("");
+      setItems([]);
     } catch (err) {
-      alert("Server error");
+      console.error(err);
+      alert("Failed to save quotation ❌");
+    } finally {
+      setLoading(false);
     }
   };
-
-  const totalCost = items.reduce((sum, i) => sum + i.cost, 0);
 
   return (
     <div style={{ padding: 20 }}>
       <h2>Quotation Form</h2>
 
+      {/* PHONE */}
       <input
-        type="tel"
-        placeholder="Owner Phone Number"
-        value={ownerPhone}
-        onChange={(e) => setOwnerPhone(e.target.value)}
-        style={{ marginBottom: 20, width: "100%", padding: 8 }}
+        type="text"
+        placeholder="Customer Phone"
+        value={phone}
+        onChange={(e) => setPhone(e.target.value)}
       />
 
-      <div style={styles.formRow}>
-        <select value={area} onChange={(e) => setArea(e.target.value)}>
-          <option value="">Select Area</option>
-          {Object.keys(areas).map((a) => (
-            <option key={a}>{a}</option>
-          ))}
-        </select>
+      <hr />
 
-        <select
-          value={description}
-          onChange={(e) => handleDescriptionChange(e.target.value)}
-          disabled={!area}
-        >
-          <option value="">Select Description</option>
-          {area &&
-            areas[area].map((d) => (
-              <option key={d.label}>{d.label}</option>
-            ))}
-        </select>
+      {/* ITEM INPUTS */}
+      <input
+        placeholder="Area"
+        value={area}
+        onChange={(e) => setArea(e.target.value)}
+      />
 
-        <input
-          type="text"
-          placeholder="Measurement"
-          value={measurement}
-          onChange={(e) => {
-            setMeasurement(e.target.value);
-            calculateCost(e.target.value, rate);
-          }}
-        />
+      <input
+        placeholder="Description"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
 
-        <input type="number" readOnly value={cost} placeholder="Cost" />
+      <input
+        type="number"
+        placeholder="Measurement"
+        value={measurement}
+        onChange={(e) => setMeasurement(e.target.value)}
+      />
 
-        <button onClick={handleAddItem}>➕ Add</button>
-      </div>
+      <input
+        type="number"
+        placeholder="Rate"
+        value={rate}
+        onChange={(e) => setRate(e.target.value)}
+      />
 
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            <th>Area</th>
-            <th>Description</th>
-            <th>Measurement</th>
-            <th>Rate</th>
-            <th>Cost</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((row, i) => (
-            <tr key={i}>
-              <td>{row.area}</td>
-              <td>{row.description}</td>
-              <td>{row.measurement}</td>
-              <td>₹{row.rate}</td>
-              <td>₹{row.cost}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <button onClick={addItem}>Add Item</button>
 
-      <h3>Total: ₹ {totalCost.toLocaleString()}</h3>
+      {/* TABLE */}
+      {items.length > 0 && (
+        <>
+          <table border="1" cellPadding="8" style={{ marginTop: 20 }}>
+            <thead>
+              <tr>
+                <th>Area</th>
+                <th>Description</th>
+                <th>Measurement</th>
+                <th>Rate</th>
+                <th>Cost</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, i) => (
+                <tr key={i}>
+                  <td>{item.area}</td>
+                  <td>{item.description}</td>
+                  <td>{item.measurement}</td>
+                  <td>{item.rate}</td>
+                  <td>₹ {item.cost}</td>
+                  <td>
+                    <button onClick={() => removeItem(i)}>❌</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-      <button style={styles.approveBtn} onClick={handleApprove}>
-        ✅ Send for Approval
-      </button>
+          <h3>Total: ₹ {totalCost}</h3>
+
+          <button onClick={submitQuotation} disabled={loading}>
+            {loading ? "Saving..." : "Submit Quotation"}
+          </button>
+        </>
+      )}
     </div>
   );
-};
+}
 
-const styles = {
-  formRow: {
-    display: "grid",
-    gridTemplateColumns: "1.5fr 2fr 1fr 1fr auto",
-    gap: 10,
-    marginBottom: 20,
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-  },
-  approveBtn: {
-    marginTop: 20,
-    padding: "10px 30px",
-    background: "#2e7d32",
-    color: "#fff",
-    border: "none",
-    fontSize: 16,
-    cursor: "pointer",
-  },
-};
-
-export default QuotationForm;
+export default Quotation;

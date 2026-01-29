@@ -3,10 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "dependencies": {
+    "lucide-react": "^0.563.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-router-dom": "^6.26.0",
     "react-scripts": "5.0.1",
+    "axios": "^1.13.4",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
