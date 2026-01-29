@@ -9,15 +9,12 @@ const PORT = process.env.PORT || 5000;
 /* -------------------- MIDDLEWARE -------------------- */
 app.use(
   cors({
-    origin: [
-      "https://pkinteriors.netlify.app",
-      "http://localhost:3000",
-    ],
+    origin: ["https://pkinteriors.netlify.app", "http://localhost:3000"],
   })
 );
 app.use(express.json());
 
-/* -------------------- DB -------------------- */
+/* -------------------- DATABASE -------------------- */
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
@@ -46,14 +43,7 @@ const initDB = async () => {
   }
 };
 
-/* -------------------- CREATE (PHONE KEY) -------------------- */
-/*
-  POST /api/quotation
-  {
-    ownerPhone: "9876543210",
-    items: [ { area, description, measurement, rate, cost } ]
-  }
-*/
+/* -------------------- CREATE QUOTATION -------------------- */
 app.post("/api/quotation", async (req, res) => {
   const { ownerPhone, items } = req.body;
 
@@ -72,14 +62,7 @@ app.post("/api/quotation", async (req, res) => {
         (owner_phone, area, description, measurement, rate, cost)
         VALUES ($1, $2, $3, $4, $5, $6)
         `,
-        [
-          ownerPhone,
-          item.area,
-          item.description,
-          item.measurement,
-          item.rate,
-          item.cost,
-        ]
+        [ownerPhone, item.area, item.description, item.measurement, item.rate, item.cost]
       );
     }
 
@@ -111,7 +94,6 @@ app.get("/api/fetchquotations", async (req, res) => {
           total_cost: 0,
         };
       }
-
       acc[row.owner_phone].items.push(row);
       acc[row.owner_phone].total_cost += Number(row.cost);
       return acc;
@@ -124,7 +106,7 @@ app.get("/api/fetchquotations", async (req, res) => {
   }
 });
 
-/* -------------------- FETCH BY PHONE (KEY API) -------------------- */
+/* -------------------- FETCH SINGLE QUOTATION BY PHONE -------------------- */
 app.get("/api/quotation/:phone", async (req, res) => {
   const { phone } = req.params;
 
@@ -143,10 +125,7 @@ app.get("/api/quotation/:phone", async (req, res) => {
       return res.status(404).json({ error: "No quotations found" });
     }
 
-    const total = result.rows.reduce(
-      (sum, r) => sum + Number(r.cost),
-      0
-    );
+    const total = result.rows.reduce((sum, r) => sum + Number(r.cost), 0);
 
     res.json({
       owner_phone: phone,
@@ -159,9 +138,9 @@ app.get("/api/quotation/:phone", async (req, res) => {
   }
 });
 
-/* -------------------- UPDATE SINGLE ROW (PHONE + ID) -------------------- */
-app.put("/api/quotation/:phone/:id", async (req, res) => {
-  const { phone, id } = req.params;
+/* -------------------- UPDATE QUOTATION BY ID -------------------- */
+app.put("/api/quotation/:id", async (req, res) => {
+  const { id } = req.params;
   const { area, description, measurement, rate, cost } = req.body;
 
   if (!area || !description || !measurement || !rate || !cost) {
@@ -177,9 +156,9 @@ app.put("/api/quotation/:phone/:id", async (req, res) => {
           measurement = $3,
           rate = $4,
           cost = $5
-      WHERE id = $6 AND owner_phone = $7
+      WHERE id = $6
       `,
-      [area, description, measurement, rate, cost, id, phone]
+      [area, description, measurement, rate, cost, id]
     );
 
     if (result.rowCount === 0) {
@@ -193,17 +172,14 @@ app.put("/api/quotation/:phone/:id", async (req, res) => {
   }
 });
 
-/* -------------------- DELETE SINGLE ROW (PHONE + ID) -------------------- */
-app.delete("/api/quotation/:phone/:id", async (req, res) => {
-  const { phone, id } = req.params;
+/* -------------------- DELETE QUOTATION BY ID -------------------- */
+app.delete("/api/quotation/:id", async (req, res) => {
+  const { id } = req.params;
 
   try {
     const result = await pool.query(
-      `
-      DELETE FROM quotations
-      WHERE id = $1 AND owner_phone = $2
-      `,
-      [id, phone]
+      `DELETE FROM quotations WHERE id = $1`,
+      [id]
     );
 
     if (result.rowCount === 0) {
@@ -217,28 +193,12 @@ app.delete("/api/quotation/:phone/:id", async (req, res) => {
   }
 });
 
-/* -------------------- DELETE ALL FOR A PHONE -------------------- */
-app.delete("/api/quotation/:phone", async (req, res) => {
-  const { phone } = req.params;
-
-  try {
-    await pool.query(
-      `DELETE FROM quotations WHERE owner_phone = $1`,
-      [phone]
-    );
-    res.json({ success: true });
-  } catch (err) {
-    console.error("❌ Delete phone error:", err);
-    res.status(500).json({ error: "Delete failed" });
-  }
-});
-
-/* -------------------- HEALTH -------------------- */
+/* -------------------- HEALTH CHECK -------------------- */
 app.get("/", (req, res) => {
   res.send("✅ PK Interiors Backend Running");
 });
 
-/* -------------------- START -------------------- */
+/* -------------------- START SERVER -------------------- */
 (async () => {
   await initDB();
   app.listen(PORT, () => {

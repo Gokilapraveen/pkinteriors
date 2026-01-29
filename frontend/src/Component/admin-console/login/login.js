@@ -5,35 +5,24 @@ import "./login.css";
 const API_BASE = "https://pkinteriors.onrender.com";
 
 function Login() {
-  /* ---------------- USERS ---------------- */
   const database = [
     { username: "admin", password: "admin123" },
     { username: "user2", password: "pass2" },
   ];
 
-  const errors = {
-    uname: "Invalid username",
-    pass: "Invalid password",
-  };
+  const errors = { uname: "Invalid username", pass: "Invalid password" };
 
   const [errorMessages, setErrorMessages] = useState({});
   const [quotations, setQuotations] = useState([]);
 
-  /* ---------------- LOGIN ---------------- */
   const handleSubmit = (e) => {
     e.preventDefault();
     const { uname, pass } = document.forms[0];
     const user = database.find((u) => u.username === uname.value);
 
-    if (!user) {
-      setErrorMessages({ name: "uname", message: errors.uname });
-      return;
-    }
-
-    if (user.password !== pass.value) {
-      setErrorMessages({ name: "pass", message: errors.pass });
-      return;
-    }
+    if (!user) return setErrorMessages({ name: "uname", message: errors.uname });
+    if (user.password !== pass.value)
+      return setErrorMessages({ name: "pass", message: errors.pass });
 
     sessionStorage.setItem("User", user.username);
     sessionStorage.setItem("Loggedin", "true");
@@ -41,11 +30,8 @@ function Login() {
   };
 
   const renderErrorMessage = (name) =>
-    name === errorMessages.name && (
-      <div className="error">{errorMessages.message}</div>
-    );
+    name === errorMessages.name && <div className="error">{errorMessages.message}</div>;
 
-  /* ---------------- FETCH ---------------- */
   const fetchQuotations = async () => {
     try {
       const res = await axios.get(`${API_BASE}/api/fetchquotations`);
@@ -56,84 +42,67 @@ function Login() {
   };
 
   useEffect(() => {
-    if (sessionStorage.getItem("Loggedin")) {
-      fetchQuotations();
-    }
+    if (sessionStorage.getItem("Loggedin")) fetchQuotations();
   }, []);
 
-  /* ---------------- LOGOUT ---------------- */
   const logoutSession = () => {
     sessionStorage.clear();
     setQuotations([]);
   };
 
-  /* ---------------- EDIT ---------------- */
-  const handleEdit = (phone, id) => {
+  const handleEdit = (id) => {
     setQuotations((prev) =>
-      prev.map((group) =>
-        group.owner_phone === phone
-          ? {
-              ...group,
-              items: group.items.map((item) =>
-                item.id === id ? { ...item, isEditing: true } : item
-              ),
-            }
-          : group
-      )
+      prev.map((group) => ({
+        ...group,
+        items: group.items.map((item) =>
+          item.id === id ? { ...item, isEditing: true } : item
+        ),
+      }))
     );
   };
 
-  const handleInputChange = (phone, id, field, value) => {
+  const handleInputChange = (id, field, value) => {
     setQuotations((prev) =>
-      prev.map((group) =>
-        group.owner_phone === phone
-          ? {
-              ...group,
-              items: group.items.map((item) => {
-                if (item.id !== id) return item;
-
-                const updated = { ...item, [field]: value };
-
-                if (field === "measurement" || field === "rate") {
-                  const m = Number(updated.measurement || 0);
-                  const r = Number(updated.rate || 0);
-                  updated.cost = m * r;
-                }
-
-                return updated;
-              }),
-            }
-          : group
-      )
+      prev.map((group) => ({
+        ...group,
+        items: group.items.map((item) => {
+          if (item.id !== id) return item;
+          const updated = { ...item, [field]: value };
+          if (field === "measurement" || field === "rate") {
+            updated.cost = Number(updated.measurement || 0) * Number(updated.rate || 0);
+          }
+          return updated;
+        }),
+      }))
     );
   };
 
-  /* ---------------- SAVE ---------------- */
-  const handleSave = async (phone, id) => {
-    const group = quotations.find((g) => g.owner_phone === phone);
-    const item = group?.items.find((i) => i.id === id);
-    if (!item) return;
+  const handleSave = async (id) => {
+    let itemToUpdate;
+    quotations.forEach((group) => {
+      group.items.forEach((item) => {
+        if (item.id === id) itemToUpdate = item;
+      });
+    });
+
+    if (!itemToUpdate) return;
 
     try {
       await axios.put(`${API_BASE}/api/quotation/${id}`, {
-        area: item.area,
-        description: item.description,
-        measurement: Number(item.measurement),
-        rate: Number(item.rate),
-        cost: Number(item.cost),
+        area: itemToUpdate.area,
+        description: itemToUpdate.description,
+        measurement: Number(itemToUpdate.measurement),
+        rate: Number(itemToUpdate.rate),
+        cost: Number(itemToUpdate.cost),
       });
 
       setQuotations((prev) =>
-        prev.map((group) =>
-          group.owner_phone === phone
-            ? {
-                ...group,
-                items: group.items.map((i) =>
-                  i.id === id ? { ...i, isEditing: false } : i
-                ),
-              }
-            : group
-        )
+        prev.map((group) => ({
+          ...group,
+          items: group.items.map((i) =>
+            i.id === id ? { ...i, isEditing: false } : i
+          ),
+        }))
       );
 
       alert("✅ Quotation updated");
@@ -143,19 +112,17 @@ function Login() {
     }
   };
 
-  /* ---------------- DELETE ---------------- */
-  const handleDelete = async (phone, id) => {
+  const handleDelete = async (id) => {
     if (!window.confirm("Delete this item?")) return;
 
     try {
       await axios.delete(`${API_BASE}/api/quotation/${id}`);
 
       setQuotations((prev) =>
-        prev.map((group) =>
-          group.owner_phone === phone
-            ? { ...group, items: group.items.filter((i) => i.id !== id) }
-            : group
-        )
+        prev.map((group) => ({
+          ...group,
+          items: group.items.filter((i) => i.id !== id),
+        }))
       );
 
       alert("🗑️ Deleted successfully");
@@ -165,22 +132,18 @@ function Login() {
     }
   };
 
-  /* ---------------- LOGIN UI ---------------- */
   const renderForm = (
     <div className="form">
       <form className="login" onSubmit={handleSubmit}>
         <input name="uname" placeholder="Username" required />
         {renderErrorMessage("uname")}
-
         <input name="pass" type="password" placeholder="Password" required />
         {renderErrorMessage("pass")}
-
         <button>Login</button>
       </form>
     </div>
   );
 
-  /* ---------------- DASHBOARD ---------------- */
   const renderDashboard = (
     <div className="dashboard">
       <h3>Welcome, {sessionStorage.getItem("User")}</h3>
@@ -188,9 +151,7 @@ function Login() {
 
       {quotations.map((group) => (
         <div key={group.owner_phone}>
-          <h4>
-            📞 {group.owner_phone} | 💰 ₹{group.total_cost}
-          </h4>
+          <h4>📞 {group.owner_phone} | 💰 ₹{group.total_cost}</h4>
 
           <table border="1">
             <thead>
@@ -215,12 +176,7 @@ function Login() {
                           type={field === "area" || field === "description" ? "text" : "number"}
                           value={item[field]}
                           onChange={(e) =>
-                            handleInputChange(
-                              group.owner_phone,
-                              item.id,
-                              field,
-                              e.target.value
-                            )
+                            handleInputChange(item.id, field, e.target.value)
                           }
                         />
                       ) : (
@@ -234,17 +190,11 @@ function Login() {
 
                   <td>
                     {item.isEditing ? (
-                      <button onClick={() => handleSave(group.owner_phone, item.id)}>
-                        💾
-                      </button>
+                      <button onClick={() => handleSave(item.id)}>💾</button>
                     ) : (
                       <>
-                        <button onClick={() => handleEdit(group.owner_phone, item.id)}>
-                          ✏️
-                        </button>
-                        <button onClick={() => handleDelete(group.owner_phone, item.id)}>
-                          🗑️
-                        </button>
+                        <button onClick={() => handleEdit(item.id)}>✏️</button>
+                        <button onClick={() => handleDelete(item.id)}>🗑️</button>
                       </>
                     )}
                   </td>
@@ -257,11 +207,7 @@ function Login() {
     </div>
   );
 
-  return (
-    <div className="app">
-      {!sessionStorage.getItem("Loggedin") ? renderForm : renderDashboard}
-    </div>
-  );
+  return <div className="app">{!sessionStorage.getItem("Loggedin") ? renderForm : renderDashboard}</div>;
 }
 
 export default Login;
