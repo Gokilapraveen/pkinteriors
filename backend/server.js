@@ -22,26 +22,47 @@ const pool = new Pool({
 
 /* -------------------- INIT TABLE -------------------- */
 const initDB = async () => {
-  const query = `
-    CREATE TABLE IF NOT EXISTS quotations (
-      id SERIAL PRIMARY KEY,
-      owner_phone VARCHAR(15) NOT NULL,
-      area TEXT NOT NULL,
-      description TEXT NOT NULL,
-      measurement NUMERIC NOT NULL,
-      rate NUMERIC NOT NULL,
-      cost NUMERIC NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `;
   try {
-    await pool.query(query);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS quotations (
+        id SERIAL PRIMARY KEY,
+        owner_phone VARCHAR(15) NOT NULL,
+        area TEXT NOT NULL,
+        description TEXT NOT NULL,
+        measurement NUMERIC NOT NULL,
+        rate NUMERIC NOT NULL,
+        cost NUMERIC NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
     console.log("✅ quotations table ready");
   } catch (err) {
     console.error("❌ DB init failed:", err);
     process.exit(1);
   }
 };
+
+/* -------------------- LOGIN API -------------------- */
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body;
+
+  // Hardcoded users (replace with DB if needed)
+  const users = [
+    { username: "admin", password: "admin123", role: "admin" },
+    { username: "supervisor", password: "super123", role: "supervisor" },
+    { username: "user2", password: "pass2", role: "user" },
+  ];
+
+  const user = users.find(
+    (u) => u.username === username && u.password === password
+  );
+
+  if (!user) {
+    return res.status(401).json({ error: "Invalid username or password" });
+  }
+
+  res.json({ username: user.username, role: user.role });
+});
 
 /* -------------------- CREATE QUOTATION -------------------- */
 app.post("/api/quotation", async (req, res) => {
@@ -77,7 +98,7 @@ app.post("/api/quotation", async (req, res) => {
   }
 });
 
-/* -------------------- FETCH ALL (GROUPED BY PHONE) -------------------- */
+/* -------------------- FETCH ALL QUOTATIONS (GROUPED) -------------------- */
 app.get("/api/fetchquotations", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -88,11 +109,7 @@ app.get("/api/fetchquotations", async (req, res) => {
 
     const grouped = result.rows.reduce((acc, row) => {
       if (!acc[row.owner_phone]) {
-        acc[row.owner_phone] = {
-          owner_phone: row.owner_phone,
-          items: [],
-          total_cost: 0,
-        };
+        acc[row.owner_phone] = { owner_phone: row.owner_phone, items: [], total_cost: 0 };
       }
       acc[row.owner_phone].items.push(row);
       acc[row.owner_phone].total_cost += Number(row.cost);
@@ -112,12 +129,7 @@ app.get("/api/quotation/:phone", async (req, res) => {
 
   try {
     const result = await pool.query(
-      `
-      SELECT *
-      FROM quotations
-      WHERE owner_phone = $1
-      ORDER BY created_at
-      `,
+      `SELECT * FROM quotations WHERE owner_phone = $1 ORDER BY created_at`,
       [phone]
     );
 
@@ -151,11 +163,7 @@ app.put("/api/quotation/:id", async (req, res) => {
     const result = await pool.query(
       `
       UPDATE quotations
-      SET area = $1,
-          description = $2,
-          measurement = $3,
-          rate = $4,
-          cost = $5
+      SET area = $1, description = $2, measurement = $3, rate = $4, cost = $5
       WHERE id = $6
       `,
       [area, description, measurement, rate, cost, id]
@@ -177,10 +185,7 @@ app.delete("/api/quotation/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    const result = await pool.query(
-      `DELETE FROM quotations WHERE id = $1`,
-      [id]
-    );
+    const result = await pool.query(`DELETE FROM quotations WHERE id = $1`, [id]);
 
     if (result.rowCount === 0) {
       return res.status(404).json({ error: "Row not found" });
