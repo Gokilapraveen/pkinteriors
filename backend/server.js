@@ -2,244 +2,204 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
+const jwt = require("jsonwebtoken");
+const PDFDocument = require("pdfkit");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 /* -------------------- MIDDLEWARE -------------------- */
-app.use(
-  cors({
-    origin: ["https://pkinteriors.netlify.app", "http://localhost:3000"],
-  })
-);
+app.use(cors({ origin: ["http://localhost:3000"] }));
 app.use(express.json());
 
-/* -------------------- DATABASE -------------------- */
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-/* -------------------- INIT DATABASE -------------------- */
-const initDB = async () => {
+/* -------------------- AUTH -------------------- */
+const generateToken = (user) =>
+  jwt.sign({ username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+const authMiddleware = (roles = []) => (req, res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "No token" });
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS customers (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        phone VARCHAR(15) UNIQUE NOT NULL,
-        type VARCHAR(20) CHECK (type IN ('OWNER', 'ENGINEER')) NOT NULL,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS quotations (
-        id SERIAL PRIMARY KEY,
-        customer_id INT REFERENCES customers(id) ON DELETE CASCADE,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS quotation_items (
-        id SERIAL PRIMARY KEY,
-        quotation_id INT REFERENCES quotations(id) ON DELETE CASCADE,
-        area TEXT NOT NULL,
-        description TEXT,
-        measurement NUMERIC NOT NULL,
-        rate NUMERIC NOT NULL,
-        cost NUMERIC NOT NULL
-      );
-    `);
-
-    console.log("✅ Database tables ready");
-  } catch (err) {
-    console.error("❌ DB init failed:", err);
-    process.exit(1);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (roles.length && !roles.includes(decoded.role)) return res.status(403).json({ error: "Forbidden" });
+    req.user = decoded;
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
   }
 };
 
-/* -------------------- CUSTOMER APIs -------------------- */
-
-/* ADD CUSTOMER */
-app.post("/api/customers", async (req, res) => {
-  const { name, phone, type } = req.body;
-
-  if (!name || !phone || !type) {
-    return res.status(400).json({ error: "Missing customer data" });
-  }
-
-  try {
-    const result = await pool.query(
-      `INSERT INTO customers (name, phone, type)
-       VALUES ($1, $2, $3)
-       RETURNING *`,
-      [name, phone, type]
+/* -------------------- INIT DB -------------------- */
+const initDB = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      phone VARCHAR(15) UNIQUE NOT NULL,
+      type VARCHAR(20) CHECK (type IN ('OWNER', 'ENGINEER')) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS quotations (
+      id SERIAL PRIMARY KEY,
+      customer_id INT REFERENCES customers(id) ON DELETE CASCADE,
+      gst_percent NUMERIC DEFAULT 18,
+      gst_amount NUMERIC DEFAULT 0,
+      grand_total NUMERIC DEFAULT 0,
+      status VARCHAR(20) CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','REJECTED')) DEFAULT 'DRAFT',
+      payment_status VARCHAR(20) CHECK (payment_status IN ('PENDING','PAID')) DEFAULT 'PENDING',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS quotation_items (
+      id SERIAL PRIMARY KEY,
+      quotation_id INT REFERENCES quotations(id) ON DELETE CASCADE,
+      area TEXT NOT NULL,
+      description TEXT,
+      measurement NUMERIC NOT NULL,
+      rate NUMERIC NOT NULL,
+      cost NUMERIC NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS invoices (
+      id SERIAL PRIMARY KEY,
+      quotation_id INT REFERENCES quotations(id),
+      invoice_no TEXT UNIQUE,
+      invoice_date DATE DEFAULT CURRENT_DATE,
+      total NUMERIC,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  console.log("✅ DB tables ready");
+};
 
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("❌ Add customer error:", err);
-    res.status(500).json({ error: "Customer creation failed" });
-  }
+/* -------------------- LOGIN -------------------- */
+app.post("/api/login", (req, res) => {
+  const users = [
+    { username: "admin", password: "admin123", role: "admin" },
+    { username: "supervisor", password: "super123", role: "supervisor" }
+  ];
+  const user = users.find(u => u.username === req.body.username && u.password === req.body.password);
+  if (!user) return res.status(401).json({ error: "Invalid login" });
+  res.json({ token: generateToken(user), role: user.role, username: user.username });
 });
 
-/* FETCH CUSTOMERS */
-app.get("/api/customers", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT id, name, phone, type FROM customers ORDER BY name`
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error("❌ Fetch customers error:", err);
-    res.status(500).json({ error: "Database error" });
-  }
+/* -------------------- CUSTOMER APIs -------------------- */
+app.post("/api/customers", authMiddleware(["admin"]), async (req, res) => {
+  const { name, phone, type } = req.body;
+  if (!name || !phone || !type) return res.status(400).json({ error: "Missing data" });
+  const result = await pool.query(
+    "INSERT INTO customers(name,phone,type) VALUES($1,$2,$3) RETURNING *",
+    [name, phone, type]
+  );
+  res.json(result.rows[0]);
+});
+app.get("/api/customers", authMiddleware(["admin","supervisor"]), async (req, res) => {
+  const result = await pool.query("SELECT id,name,phone,type FROM customers ORDER BY name");
+  res.json(result.rows);
 });
 
 /* -------------------- QUOTATION APIs -------------------- */
-
-/* CREATE QUOTATION WITH ITEMS */
-app.post("/api/quotation", async (req, res) => {
+app.post("/api/quotation", authMiddleware(["admin","supervisor"]), async (req,res)=>{
   const { customer_id, items } = req.body;
-
-  if (!customer_id || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: "Invalid payload" });
-  }
-
+  if(!customer_id || !items?.length) return res.status(400).json({error:"Invalid"});
+  const subtotal = items.reduce((s,i)=>s+Number(i.cost),0);
+  const gst_percent = 18;
+  const gst_amount = subtotal*gst_percent/100;
+  const grand_total = subtotal + gst_amount;
   const client = await pool.connect();
-  try {
+  try{
     await client.query("BEGIN");
-
-    const quotationRes = await client.query(
-      `INSERT INTO quotations (customer_id)
-       VALUES ($1) RETURNING id`,
-      [customer_id]
+    const qRes = await client.query(
+      "INSERT INTO quotations(customer_id,gst_percent,gst_amount,grand_total) VALUES($1,$2,$3,$4) RETURNING id",
+      [customer_id,gst_percent,gst_amount,grand_total]
     );
-
-    const quotationId = quotationRes.rows[0].id;
-
-    for (const item of items) {
+    const qId = qRes.rows[0].id;
+    for(const i of items){
       await client.query(
-        `INSERT INTO quotation_items
-         (quotation_id, area, description, measurement, rate, cost)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          quotationId,
-          item.area,
-          item.description,
-          item.measurement,
-          item.rate,
-          item.cost,
-        ]
+        "INSERT INTO quotation_items(quotation_id,area,description,measurement,rate,cost) VALUES($1,$2,$3,$4,$5,$6)",
+        [qId,i.area,i.description,i.measurement,i.rate,i.cost]
       );
     }
-
     await client.query("COMMIT");
-    res.json({ success: true, quotation_id: quotationId });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("❌ Create quotation error:", err);
-    res.status(500).json({ error: "Quotation creation failed" });
-  } finally {
-    client.release();
-  }
+    res.json({success:true,quotation_id:qId});
+  }catch(err){await client.query("ROLLBACK");console.error(err);res.status(500).json({error:"Failed"});}
+  finally{client.release();}
 });
 
-/* FETCH ALL QUOTATIONS (ADMIN VIEW) */
-app.get("/api/fetchquotations", async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        q.id AS quotation_id,
-        c.name,
-        c.phone,
-        c.type,
-        qi.*
-      FROM quotations q
-      JOIN customers c ON q.customer_id = c.id
-      JOIN quotation_items qi ON qi.quotation_id = q.id
-      ORDER BY q.id DESC
-    `);
-
-    const grouped = {};
-
-    result.rows.forEach(row => {
-      if (!grouped[row.quotation_id]) {
-        grouped[row.quotation_id] = {
-          quotation_id: row.quotation_id,
-          customer_name: row.name,
-          customer_phone: row.phone,
-          customer_type: row.type,
-          total_cost: 0,
-          items: [],
-        };
-      }
-
-      grouped[row.quotation_id].items.push({
-        id: row.id,
-        area: row.area,
-        description: row.description,
-        measurement: row.measurement,
-        rate: row.rate,
-        cost: row.cost,
-      });
-
-      grouped[row.quotation_id].total_cost += Number(row.cost);
-    });
-
-    res.json(Object.values(grouped));
-  } catch (err) {
-    console.error("❌ Fetch quotations error:", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-/* UPDATE QUOTATION ITEM */
-app.put("/api/quotation/item/:id", async (req, res) => {
-  const { id } = req.params;
-  const { area, description, measurement, rate, cost } = req.body;
-
-  try {
-    const result = await pool.query(
-      `UPDATE quotation_items
-       SET area=$1, description=$2, measurement=$3, rate=$4, cost=$5
-       WHERE id=$6`,
-      [area, description, measurement, rate, cost, id]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Item not found" });
+/* Fetch all quotations (admin view) */
+app.get("/api/fetchquotations", authMiddleware(["admin","supervisor"]), async (req,res)=>{
+  const result = await pool.query(`
+    SELECT q.id AS quotation_id, c.name,c.phone,c.type,q.gst_percent,q.gst_amount,q.grand_total,q.status,q.payment_status,qi.*
+    FROM quotations q
+    JOIN customers c ON q.customer_id=c.id
+    JOIN quotation_items qi ON qi.quotation_id=q.id
+    ORDER BY q.id DESC
+  `);
+  const grouped = {};
+  result.rows.forEach(r=>{
+    if(!grouped[r.quotation_id]){
+      grouped[r.quotation_id]={quotation_id:r.quotation_id,customer_name:r.name,customer_phone:r.phone,customer_type:r.type,
+        gst_percent:r.gst_percent,gst_amount:r.gst_amount,grand_total:r.grand_total,status:r.status,payment_status:r.payment_status,items:[]};
     }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("❌ Update item error:", err);
-    res.status(500).json({ error: "Update failed" });
-  }
-});
-
-/* DELETE QUOTATION ITEM */
-app.delete("/api/quotation/item/:id", async (req, res) => {
-  try {
-    await pool.query(`DELETE FROM quotation_items WHERE id=$1`, [req.params.id]);
-    res.json({ success: true });
-  } catch (err) {
-    console.error("❌ Delete item error:", err);
-    res.status(500).json({ error: "Delete failed" });
-  }
-});
-
-/* -------------------- HEALTH CHECK -------------------- */
-app.get("/", (req, res) => {
-  res.send("✅ PK Interiors Backend Running");
-});
-
-/* -------------------- START SERVER -------------------- */
-(async () => {
-  await initDB();
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    grouped[r.quotation_id].items.push({id:r.id,area:r.area,description:r.description,measurement:r.measurement,rate:r.rate,cost:r.cost});
   });
-})();
+  res.json(Object.values(grouped));
+});
+
+/* Approve / Reject quotation */
+app.put("/api/quotation/:id/approve", authMiddleware(["admin"]), async (req,res)=>{
+  await pool.query("UPDATE quotations SET status='APPROVED' WHERE id=$1",[req.params.id]);
+  res.json({success:true});
+});
+app.put("/api/quotation/:id/reject", authMiddleware(["admin"]), async (req,res)=>{
+  await pool.query("UPDATE quotations SET status='REJECTED' WHERE id=$1",[req.params.id]);
+  res.json({success:true});
+});
+
+/* Mark payment */
+app.put("/api/quotation/:id/pay", authMiddleware(["admin"]), async (req,res)=>{
+  await pool.query("UPDATE quotations SET payment_status='PAID' WHERE id=$1",[req.params.id]);
+  res.json({success:true});
+});
+
+/* Generate PDF */
+const generatePDF = (quotation,res)=>{
+  const doc = new PDFDocument();
+  res.setHeader("Content-Type","application/pdf");
+  doc.pipe(res);
+  doc.fontSize(18).text("PK Interiors – Quotation / Invoice");
+  doc.moveDown();
+  doc.text(`Customer: ${quotation.customer_name}`);
+  doc.text(`Type: ${quotation.customer_type}`);
+  doc.text(`Phone: ${quotation.customer_phone}`);
+  doc.text(`Status: ${quotation.status}`);
+  doc.text(`Payment: ${quotation.payment_status}`);
+  doc.moveDown();
+  quotation.items.forEach((item,i)=>{
+    doc.text(`${i+1}. ${item.area} | ${item.description} | ${item.measurement} x ${item.rate} = ₹${item.cost}`);
+  });
+  doc.moveDown();
+  doc.text(`GST ${quotation.gst_percent}%: ₹${quotation.gst_amount}`);
+  doc.text(`Total: ₹${quotation.grand_total}`);
+  doc.end();
+};
+
+app.get("/api/quotation/:id/pdf", authMiddleware(["admin","supervisor"]), async (req,res)=>{
+  const q = await pool.query(`
+    SELECT q.id AS quotation_id, c.name,c.phone,c.type,q.gst_percent,q.gst_amount,q.grand_total,q.status,q.payment_status,qi.*
+    FROM quotations q
+    JOIN customers c ON q.customer_id=c.id
+    JOIN quotation_items qi ON qi.quotation_id=q.id
+    WHERE q.id=$1
+  `,[req.params.id]);
+  if(!q.rows.length) return res.status(404).json({error:"Not found"});
+  const grouped = {customer_name:q.rows[0].name,customer_phone:q.rows[0].phone,customer_type:q.rows[0].type,
+    gst_percent:q.rows[0].gst_percent,gst_amount:q.rows[0].gst_amount,grand_total:q.rows[0].grand_total,
+    status:q.rows[0].status,payment_status:q.rows[0].payment_status,items:[]};
+  q.rows.forEach(r=>grouped.items.push({area:r.area,description:r.description,measurement:r.measurement,rate:r.rate,cost:r.cost}));
+  generatePDF(grouped,res);
+});
+
+app.get("/",(req,res)=>res.send("✅ Backend Running"));
+
+(async()=>{await initDB();app.listen(PORT,()=>console.log(`🚀 Server running on port ${PORT}`))})();
