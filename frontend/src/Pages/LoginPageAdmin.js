@@ -1,5 +1,5 @@
 // LoginPageAdmin.js
-import Login from "./login/login";
+import Login from "../Component/admin-console/login/login";
 
 const LoginAction = () => {
   return <Login />;

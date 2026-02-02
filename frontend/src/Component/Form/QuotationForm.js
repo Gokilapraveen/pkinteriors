@@ -1,219 +1,221 @@
 import React, { useState, useEffect } from "react";
-import areasData from "../../JsonData/area.json";
 import axios from "axios";
 
 const API_BASE = "https://pkinteriors.onrender.com";
 
-const QuotationForm = () => {
-  const [ownerPhone, setOwnerPhone] = useState("");
-  const [area, setArea] = useState("");
-  const [description, setDescription] = useState("");
-  const [measurement, setMeasurement] = useState("");
-  const [rate, setRate] = useState(0);
-  const [cost, setCost] = useState(0);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(false);
+export default function Quotation() {
+  const role = sessionStorage.getItem("UserRole");
+  const user = sessionStorage.getItem("User");
 
-  const areas = areasData;
+  const [customers, setCustomers] = useState([]);
+  const [owner, setOwner] = useState(role === "admin" ? "" : user);
 
-  // Calculate cost whenever measurement or rate changes
-  const calculateCost = (m, r) => {
-    const val = parseFloat(m) * parseFloat(r);
-    setCost(!isNaN(val) ? val : 0);
+  const [items, setItems] = useState([
+    { area: "", description: "", measurement: "", rate: "", cost: 0 }
+  ]);
+
+  const [errors, setErrors] = useState({});
+
+  /* ---------------- FETCH CUSTOMERS (ADMIN) ---------------- */
+  useEffect(() => {
+    if (role === "admin") {
+      axios
+        .get(`${API_BASE}/api/customers`)
+        .then(res => setCustomers(res.data))
+        .catch(() => {});
+    }
+  }, [role]);
+
+  /* ---------------- HELPERS ---------------- */
+  const calculateCost = (m, r) =>
+    Number(m || 0) * Number(r || 0);
+
+  const totalCost = items.reduce(
+    (sum, item) => sum + Number(item.cost || 0),
+    0
+  );
+
+  /* ---------------- ITEM HANDLERS ---------------- */
+  const handleItemChange = (index, field, value) => {
+    const updated = [...items];
+    updated[index][field] = value;
+
+    updated[index].cost = calculateCost(
+      updated[index].measurement,
+      updated[index].rate
+    );
+
+    setItems(updated);
   };
 
-  // Handle description selection to set rate
-  const handleDescriptionChange = (value) => {
-    setDescription(value);
-    if (area) {
-      const selected = areas[area].find((d) => d.label === value);
-      if (selected) {
-        setRate(selected.rate);
-        calculateCost(measurement, selected.rate);
-      }
-    }
-  };
-
-  // Add item to table
-  const handleAddItem = () => {
-    if (!area || !description || !measurement) {
-      alert("Fill all fields");
-      return;
-    }
-
-    if (isNaN(Number(measurement))) {
-      alert("Measurement must be a number");
-      return;
-    }
-
-    setItems((prev) => [
-      ...prev,
-      {
-        id: Date.now(), // unique ID
-        area,
-        description,
-        measurement: Number(measurement),
-        rate: Number(rate),
-        cost: Number(cost),
-      },
+  const addItem = () => {
+    setItems([
+      ...items,
+      { area: "", description: "", measurement: "", rate: "", cost: 0 }
     ]);
-
-    // Reset inputs
-    setDescription("");
-    setMeasurement("");
-    setRate(0);
-    setCost(0);
   };
 
-  // Remove item
-  const handleRemoveItem = (id) => {
-    setItems((prev) => prev.filter((item) => item.id !== id));
+  const removeItem = (index) => {
+    if (items.length === 1) return;
+    setItems(items.filter((_, i) => i !== index));
   };
 
-  // Submit quotation to backend
-  const handleApprove = async () => {
-    if (!ownerPhone) {
-      alert("Enter owner phone number");
-      return;
-    }
+  /* ---------------- VALIDATION ---------------- */
+  const validate = () => {
+    const errs = {};
 
-    if (items.length === 0) {
-      alert("Add at least one item");
-      return;
-    }
+    if (!owner) errs.owner = "Customer is required";
+
+    items.forEach((item, i) => {
+      if (!item.area) errs[`area${i}`] = "Required";
+      if (!item.measurement) errs[`measurement${i}`] = "Required";
+      if (!item.rate) errs[`rate${i}`] = "Required";
+    });
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  /* ---------------- SUBMIT ---------------- */
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!validate()) return;
 
     try {
-      setLoading(true);
-      const res = await axios.post(`${API_BASE}/api/quotation`, {
-        ownerPhone,
-        items,
+      await axios.post(`${API_BASE}/api/quotation`, {
+        owner_phone: owner,
+        total_cost: totalCost,
+        items: items.map(i => ({
+          area: i.area,
+          description: i.description,
+          measurement: Number(i.measurement),
+          rate: Number(i.rate),
+          cost: Number(i.cost)
+        }))
       });
 
-      if (res.data.success) {
-        alert("Quotation saved successfully ✅");
-        setOwnerPhone("");
-        setItems([]);
-      } else {
-        alert(res.data.error || "Failed to save quotation");
-      }
+      alert("✅ Quotation created successfully");
+
+      setItems([{ area: "", description: "", measurement: "", rate: "", cost: 0 }]);
+      if (role === "admin") setOwner("");
+
     } catch (err) {
-      console.error(err);
-      alert("Server error ❌");
-    } finally {
-      setLoading(false);
+      alert("❌ Failed to create quotation");
     }
   };
 
-  const totalCost = items.reduce((sum, i) => sum + i.cost, 0);
-
+  /* ---------------- UI ---------------- */
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Quotation Form</h2>
+    <div className="container mt-4">
+      <h3 className="mb-4">Create Quotation</h3>
 
-      <input
-        type="tel"
-        placeholder="Owner Phone Number"
-        value={ownerPhone}
-        onChange={(e) => setOwnerPhone(e.target.value)}
-        style={{ marginBottom: 20, width: "100%", padding: 8 }}
-      />
+      <form onSubmit={handleSubmit}>
+        {/* CUSTOMER */}
+        {role === "admin" && (
+          <div className="mb-3">
+            <label className="form-label">Customer</label>
+            <select
+              className={`form-select ${errors.owner && "is-invalid"}`}
+              value={owner}
+              onChange={e => setOwner(e.target.value)}
+            >
+              <option value="">Select Customer</option>
+              {customers.map(c => (
+                <option key={c.phone} value={c.phone}>
+                  {c.name} – {c.phone}
+                </option>
+              ))}
+            </select>
+            <div className="invalid-feedback">{errors.owner}</div>
+          </div>
+        )}
 
-      <div style={styles.formRow}>
-        <select value={area} onChange={(e) => setArea(e.target.value)}>
-          <option value="">Select Area</option>
-          {Object.keys(areas).map((a) => (
-            <option key={a}>{a}</option>
-          ))}
-        </select>
+        {/* ITEMS */}
+        {items.map((item, index) => (
+          <div key={index} className="card mb-3">
+            <div className="card-body">
+              <h6>Item {index + 1}</h6>
 
-        <select
-          value={description}
-          onChange={(e) => handleDescriptionChange(e.target.value)}
-          disabled={!area}
-        >
-          <option value="">Select Description</option>
-          {area &&
-            areas[area].map((d) => <option key={d.label}>{d.label}</option>)}
-        </select>
+              <div className="row g-3">
+                <div className="col-md-3">
+                  <input
+                    className={`form-control ${errors[`area${index}`] && "is-invalid"}`}
+                    placeholder="Area"
+                    value={item.area}
+                    onChange={e =>
+                      handleItemChange(index, "area", e.target.value)
+                    }
+                  />
+                </div>
 
-        <input
-          type="number"
-          placeholder="Measurement"
-          value={measurement}
-          onChange={(e) => {
-            setMeasurement(e.target.value);
-            calculateCost(e.target.value, rate);
-          }}
-        />
+                <div className="col-md-3">
+                  <input
+                    className="form-control"
+                    placeholder="Description"
+                    value={item.description}
+                    onChange={e =>
+                      handleItemChange(index, "description", e.target.value)
+                    }
+                  />
+                </div>
 
-        <input type="number" readOnly value={cost} placeholder="Cost" />
+                <div className="col-md-2">
+                  <input
+                    type="number"
+                    className={`form-control ${errors[`measurement${index}`] && "is-invalid"}`}
+                    placeholder="Measurement"
+                    value={item.measurement}
+                    onChange={e =>
+                      handleItemChange(index, "measurement", e.target.value)
+                    }
+                  />
+                </div>
 
-        <button onClick={handleAddItem}>➕ Add</button>
-      </div>
+                <div className="col-md-2">
+                  <input
+                    type="number"
+                    className={`form-control ${errors[`rate${index}`] && "is-invalid"}`}
+                    placeholder="Rate"
+                    value={item.rate}
+                    onChange={e =>
+                      handleItemChange(index, "rate", e.target.value)
+                    }
+                  />
+                </div>
 
-      {items.length > 0 && (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th>Area</th>
-              <th>Description</th>
-              <th>Measurement</th>
-              <th>Rate</th>
-              <th>Cost</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.area}</td>
-                <td>{item.description}</td>
-                <td>{item.measurement}</td>
-                <td>₹{item.rate}</td>
-                <td>₹{item.cost}</td>
-                <td>
-                  <button onClick={() => handleRemoveItem(item.id)}>❌</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+                <div className="col-md-2">
+                  <input
+                    className="form-control"
+                    value={item.cost}
+                    disabled
+                  />
+                </div>
+              </div>
 
-      <h3>Total: ₹ {totalCost.toLocaleString()}</h3>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger mt-2"
+                onClick={() => removeItem(index)}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
 
-      <button
-        style={{ ...styles.approveBtn, opacity: loading ? 0.6 : 1 }}
-        onClick={handleApprove}
-        disabled={loading}
-      >
-        {loading ? "Sending..." : "✅ Send for Approval"}
-      </button>
+        {/* ACTIONS */}
+        <div className="d-flex justify-content-between align-items-center">
+          <button type="button" className="btn btn-secondary" onClick={addItem}>
+            ➕ Add Item
+          </button>
+
+          <h5>Total: ₹ {totalCost}</h5>
+        </div>
+
+        <button className="btn btn-primary mt-3 w-100">
+          Save Quotation
+        </button>
+      </form>
     </div>
   );
-};
-
-const styles = {
-  formRow: {
-    display: "grid",
-    gridTemplateColumns: "1.5fr 2fr 1fr 1fr auto",
-    gap: 10,
-    marginBottom: 20,
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    marginBottom: 20,
-  },
-  approveBtn: {
-    marginTop: 20,
-    padding: "10px 30px",
-    background: "#2e7d32",
-    color: "#fff",
-    border: "none",
-    fontSize: 16,
-    cursor: "pointer",
-  },
-};
-
-export default QuotationForm;
+}
